@@ -55,8 +55,8 @@ fun SettingsScreen(viewModel: TetrisViewModel, onBack: () -> Unit) {
                     Switch(checked = isMusicOn, onCheckedChange = {
                         isMusicOn = it
                         viewModel.isMusicOn = it
+                        viewModel.setSoundManagerBGM(it)
                         viewModel.saveSettings()
-                        if (it) viewModel.playMusic() else viewModel.stopMusic()
                     })
                 }
                 if (isMusicOn) {

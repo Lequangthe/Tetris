@@ -20,9 +20,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import com.example.tetris.logic.TetrisPiece
 import com.example.tetris.logic.TetrisViewModel
 import kotlin.math.abs
@@ -41,6 +44,16 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
     val isGameOver    = viewModel.isGameOver
     val isPaused      = viewModel.isPaused
     val isGhostOn     = viewModel.isGhostOn
+
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) { viewModel.onResume() }
+            override fun onPause(owner: LifecycleOwner)  { viewModel.onPause()  }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     var dragStarted by remember { mutableStateOf(false) }
     var totalDx by remember { mutableStateOf(0f) }
@@ -66,9 +79,8 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     StatText("Score: $score")
-                    StatText("Level: ${speedLevel + 1}")
                     StatText("Lines: $lines")
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -87,14 +99,12 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Hold & Next Row
+            // Next Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.Top
             ) {
-                InfoSection(label = "Hold:", piece = null)
-                Spacer(modifier = Modifier.width(40.dp))
                 InfoSection(label = "Next:", piece = nextPiece)
             }
 

@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -13,16 +14,15 @@ import com.example.tetris.ui.TetrisApp
 import com.example.tetris.ui.theme.TETRISTheme
 
 class MainActivity : ComponentActivity() {
-    
-    private lateinit var viewModel: TetrisViewModel
-    
+
+    private val viewModel: TetrisViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
-        viewModel = TetrisViewModel()
-        viewModel.initPrefs(applicationContext)
-        
+
+        viewModel.initPrefs()
+
         setContent {
             val view = LocalView.current
             if (!view.isInEditMode) {
@@ -37,16 +37,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    
-    override fun onPause() {
-        super.onPause()
-        viewModel.stopMusic()
-    }
-    
+
     override fun onResume() {
         super.onResume()
-        if (!viewModel.isGameOver && !viewModel.isPaused) {
-            viewModel.playMusic()
-        }
+        viewModel.onResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        viewModel.onPause()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        viewModel.onDestroy()
     }
 }

@@ -28,7 +28,7 @@ class SoundManager(private val context: Context) {
         set(value) {
             field = value
             prefs.edit().putBoolean("bgm_enabled", value).apply()
-            if (value) resumeBGM() else pauseBGM()
+            if (!value) pauseBGM() else resumeBGM()
         }
 
     init {
@@ -94,7 +94,11 @@ class SoundManager(private val context: Context) {
     }
 
     fun resumeBGM() {
-        if (bgmEnabled && mediaPlayer != null && !mediaPlayer!!.isPlaying) {
+        if (!bgmEnabled) return
+        if (mediaPlayer == null) {
+            // MediaPlayer đã bị release, tạo lại
+            startBGM()
+        } else if (!mediaPlayer!!.isPlaying) {
             mediaPlayer?.start()
         }
     }

@@ -1,14 +1,19 @@
 package com.example.tetris.logic
 
+import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.ToneGenerator
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tetris.audio.SoundManager
+import com.example.tetris.audio.TetrisSound
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -31,7 +36,7 @@ data class TetrisPiece(
     }
 }
 
-class TetrisViewModel : ViewModel() {
+class TetrisViewModel(application: Application) : AndroidViewModel(application) {
 
     // ========== GAME STATE (KHỞI TẠO ĐÚNG CÁCH) ==========
     var grid by mutableStateOf(Array(20) { Array(10) { 0L } })
@@ -77,7 +82,7 @@ class TetrisViewModel : ViewModel() {
     private var lockJob: kotlinx.coroutines.Job? = null
     private var prefs: SharedPreferences? = null
 
-    private val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
+    private var soundManager: SoundManager? = null
 
     private val shapes = listOf(
         TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,1,1,1), intArrayOf(0,0,0,0), intArrayOf(0,0,0,0)), 0xFF00E5F0, "I"),
@@ -94,9 +99,12 @@ class TetrisViewModel : ViewModel() {
         startGame()
     }
 
-    fun initPrefs(context: Context) {
+    fun initPrefs() {
+        val context = getApplication<Application>()
         prefs = context.getSharedPreferences("tetris_settings", Context.MODE_PRIVATE)
         loadSettings()
+        soundManager = SoundManager(context)
+        soundManager?.startBGM()
     }
 
     private fun loadSettings() {
@@ -228,6 +236,7 @@ class TetrisViewModel : ViewModel() {
         }
         if (rowsCleared > 0) {
             grid = newGrid
+            playSound("clear")
             val points = mapOf(1 to 40, 2 to 100, 3 to 300, 4 to 1200)
             score += points[rowsCleared] ?: 40
             lines += rowsCleared
@@ -240,6 +249,7 @@ class TetrisViewModel : ViewModel() {
             if (!collision(it.matrix, currentX - 1, currentY)) {
                 currentX--
                 playSound("move")
+                resetLockDelay()
             }
         }
     }
@@ -250,20 +260,39 @@ class TetrisViewModel : ViewModel() {
             if (!collision(it.matrix, currentX + 1, currentY)) {
                 currentX++
                 playSound("move")
+                resetLockDelay()
             }
         }
     }
 
     fun rotatePiece() {
         if (isGameOver || isPaused) return
-        currentPiece?.let {
-            val rotated = Array(4) { IntArray(4) }
-            for (i in 0..3)
-                for (j in 0..3)
-                    rotated[j][3 - i] = it.matrix[i][j]
-            if (!collision(rotated, currentX, currentY)) {
-                currentPiece = it.copy(matrix = rotated)
+        val piece = currentPiece ?: return
+        val rotated = Array(4) { IntArray(4) }
+        for (i in 0..3) for (j in 0..3) rotated[j][3-i] = piece.matrix[i][j]
+
+        val kicks = listOf(0 to 0, 1 to 0, -1 to 0, 2 to 0, -2 to 0)
+        for ((dx, dy) in kicks) {
+            if (!collision(rotated, currentX + dx, currentY + dy)) {
+                currentPiece = piece.copy(matrix = rotated)
+                currentX += dx
+                currentY += dy
                 playSound("rotate")
+                resetLockDelay()
+                return
+            }
+        }
+        // All kicks failed — do nothing
+    }
+
+    private fun resetLockDelay() {
+        lockJob?.cancel()
+        currentPiece?.let {
+            if (collision(it.matrix, currentX, currentY + 1)) {
+                lockJob = viewModelScope.launch {
+                    delay(500L)
+                    mergePiece()
+                }
             }
         }
     }
@@ -285,10 +314,7 @@ class TetrisViewModel : ViewModel() {
                 lockJob?.cancel()
             } else {
                 if (lockJob == null || !lockJob!!.isActive) {
-                    lockJob = viewModelScope.launch {
-                        delay(300L)
-                        mergePiece()
-                    }
+                    resetLockDelay()
                 }
             }
         }
@@ -297,8 +323,36 @@ class TetrisViewModel : ViewModel() {
     fun togglePause() {
         if (!isGameOver) {
             isPaused = !isPaused
-            if (!isPaused) startGameLoop() else gameJob?.cancel()
+            if (!isPaused) {
+                startGameLoop()
+                soundManager?.resumeBGM()
+            } else {
+                gameJob?.cancel()
+                soundManager?.pauseBGM()
+            }
         }
+    }
+
+    fun onResume() {
+        if (soundManager?.bgmEnabled == true) {
+            soundManager?.resumeBGM()
+        }
+        if (!isGameOver && !isPaused) startGameLoop()
+    }
+
+    fun onPause() {
+        soundManager?.pauseBGM()
+        gameJob?.cancel()
+    }
+
+    fun onDestroy() {
+        soundManager?.release()
+    }
+
+    fun setSoundManagerBGM(enabled: Boolean) {
+        soundManager?.bgmEnabled = enabled
+        if (!enabled) soundManager?.pauseBGM()
+        else soundManager?.resumeBGM()
     }
 
     private fun startGameLoop() {
@@ -322,30 +376,30 @@ class TetrisViewModel : ViewModel() {
         return ghostY
     }
 
-    fun playSound(name: String) {
-        if (!isSfxOn) return
-        val tone = when (name) {
-            "move" -> ToneGenerator.TONE_PROP_BEEP
-            "rotate" -> ToneGenerator.TONE_PROP_BEEP2
-            "lock" -> ToneGenerator.TONE_PROP_ACK
-            "clear" -> ToneGenerator.TONE_DTMF_D
-            else -> ToneGenerator.TONE_PROP_BEEP
-        }
-        toneGenerator.startTone(tone, 100)
-    }
-
     fun playMusic() {
-        android.util.Log.d("TetrisSound", "Music play")
+        soundManager?.resumeBGM()
     }
 
     fun stopMusic() {
-        android.util.Log.d("TetrisSound", "Music stopped")
+        soundManager?.pauseBGM()
+    }
+
+    fun playSound(name: String) {
+        if (!isSfxOn) return
+        val sound = when(name) {
+            "move"     -> TetrisSound.MOVE
+            "rotate"   -> TetrisSound.ROTATE
+            "lock"     -> TetrisSound.LOCK
+            "clear"    -> TetrisSound.CLEAR
+            "gameover" -> TetrisSound.GAME_OVER
+            else       -> return
+        }
+        soundManager?.play(sound)
     }
 
     override fun onCleared() {
         super.onCleared()
         gameJob?.cancel()
-        stopMusic()
-        toneGenerator.release()
+        onDestroy()
     }
 }
