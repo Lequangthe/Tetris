@@ -3,6 +3,7 @@ package com.example.tetris.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -60,6 +61,9 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
     var totalDy by remember { mutableStateOf(0f) }
     var hasHardDropped by remember { mutableStateOf(false) }
 
+    var easterEggClicks by remember { mutableStateOf(0) }
+    var showEasterEgg by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -105,7 +109,17 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.Top
             ) {
-                InfoSection(label = "Next:", piece = nextPiece)
+                InfoSection(
+                    label = "Next:",
+                    piece = nextPiece,
+                    onClick = {
+                        easterEggClicks++
+                        if (easterEggClicks >= 4) {
+                            showEasterEgg = true
+                            easterEggClicks = 0
+                        }
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -233,6 +247,24 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
         if (isPaused && !isGameOver) {
             GameResultOverlay(title = "PAUSED", score = score, btnText = "RESUME") { viewModel.togglePause() }
         }
+
+        if (showEasterEgg) {
+            AlertDialog(
+                onDismissRequest = { showEasterEgg = false },
+                confirmButton = {
+                    TextButton(onClick = { showEasterEgg = false }) {
+                        Text("OK")
+                    }
+                },
+                title = { Text("Thông tin tác giả") },
+                text = {
+                    Column {
+                        Text("Tác giả: Lê Quang Thế")
+                        Text("Zalo: 0387220880")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -247,8 +279,11 @@ private fun StatText(text: String) {
 }
 
 @Composable
-private fun InfoSection(label: String, piece: TetrisPiece?) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun InfoSection(label: String, piece: TetrisPiece?, onClick: (() -> Unit)? = null) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier
+    ) {
         Text(text = label, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF455A64))
         Spacer(modifier = Modifier.height(4.dp))
         Box(
