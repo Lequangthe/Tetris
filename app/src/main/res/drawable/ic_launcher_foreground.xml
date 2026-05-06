@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- T-Tetromino Shadow -->
+    <path
+        android:fillColor="#33000000"
+        android:pathData="M33,41h14v14h-14z M49,41h14v14h-14z M65,41h14v14h-14z M49,57h14v14h-14z" />
+    <!-- T-Tetromino Blocks -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M31,39h14v14h-14z M47,39h14v14h-14z M63,39h14v14h-14z M47,55h14v14h-14z" />
+</vector>

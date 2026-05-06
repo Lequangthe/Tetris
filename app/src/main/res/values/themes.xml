@@ -1,0 +1,4 @@
+<resources>
+
+    <style name="Theme.TETRIS" parent="Theme.MaterialComponents.Light" />
+</resources>
