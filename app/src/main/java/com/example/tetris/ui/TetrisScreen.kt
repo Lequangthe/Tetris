@@ -28,11 +28,17 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.tetris.logic.TetrisPiece
+import androidx.compose.ui.res.painterResource
+import com.example.tetris.logic.BonusType
 import com.example.tetris.logic.TetrisViewModel
+import com.example.tetris.ui.theme.LocalTetrisColors
+import androidx.compose.ui.draw.shadow
+import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.abs
 
 @Composable
-fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
+fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit, isDark: Boolean) {
     val grid          = viewModel.grid
     val currentPiece  = viewModel.currentPiece
     val currentX      = viewModel.currentX
@@ -64,10 +70,28 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
     var easterEggClicks by remember { mutableStateOf(0) }
     var showEasterEgg by remember { mutableStateOf(false) }
 
+    var linesClickCount by remember { mutableStateOf(0) }
+    var lastClickTime by remember { mutableStateOf(0L) }
+    val powerUpMessage = viewModel.powerUpMessage
+
+    var currentTime by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(key1 = viewModel.powerUpCooldownEnd) {
+        while (viewModel.powerUpCooldownEnd > System.currentTimeMillis()) {
+            currentTime = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
+    val cooldownRemaining = if (viewModel.powerUpCooldownEnd > currentTime) {
+        val r = viewModel.powerUpCooldownEnd - currentTime
+        "${r / 60000}:${String.format(Locale.ROOT, "%02d", (r % 60000) / 1000)}"
+    } else null
+
+    val colors = if (isDark) com.example.tetris.ui.theme.DarkTokens else com.example.tetris.ui.theme.LightTokens
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FF))
+            .background(colors.screenBg)
             .windowInsetsPadding(WindowInsets.safeDrawing),
         contentAlignment = Alignment.Center
     ) {
@@ -84,24 +108,86 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    StatText("Score: $score")
-                    StatText("Lines: $lines")
+                    StatItem(label = "SCORE", value = "$score", valueColor = colors.accentCyan, colors = colors)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier.pointerInput(Unit) {
+                                detectTapGestures(onTap = {
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastClickTime < 500) {
+                                        linesClickCount = 0
+                                        viewModel.activatePowerUp()
+                                    } else {
+                                        linesClickCount++
+                                    }
+                                    lastClickTime = now
+                                })
+                            }
+                        ) {
+                            StatItem(label = "LINES", value = "$lines", valueColor = colors.accentAmber, colors = colors)
+                        }
+                        cooldownRemaining?.let {
+                            Text(text = it, fontSize = 10.sp, color = colors.textMuted, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(onClick = { viewModel.togglePause() }, modifier = Modifier.size(28.dp)) {
                         Icon(
                             imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                             contentDescription = if (isPaused) "Resume" else "Pause",
-                            tint = Color(0xFF455A64)
+                            tint = colors.textPrimary
                         )
                     }
                     IconButton(onClick = onSettingsClick, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color(0xFF455A64))
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = colors.textPrimary)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            // Hiển thị Bonus hiện có
+            viewModel.currentBonus?.let { bonus ->
+                IconButton(
+                    onClick = { viewModel.useBonus() },
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(end = 16.dp, top = 8.dp)
+                        .size(56.dp)
+                        .background(Color.Yellow.copy(alpha = 0.2f), shape = MaterialTheme.shapes.medium)
+                ) {
+                    Icon(
+                        painter = painterResource(id = bonus.iconRes),
+                        contentDescription = bonus.displayName,
+                        tint = Color(0xFFE64A19),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+
+            powerUpMessage?.let { msg ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = colors.boardBg,
+                        shadowElevation = 4.dp
+                    ) {
+                        Text(
+                            text = msg,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Next Row
             Row(
@@ -112,6 +198,7 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
                 InfoSection(
                     label = "Next:",
                     piece = nextPiece,
+                    colors = colors,
                     onClick = {
                         easterEggClicks++
                         if (easterEggClicks >= 4) {
@@ -129,8 +216,9 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .aspectRatio(0.5f)
-                    .background(Color(0xFFF0F0F0))
-                    .border(1.5.dp, Color(0xFF78909C))
+                    .shadow(4.dp, RoundedCornerShape(12.dp), spotColor = Color(0x18000000))
+                    .background(colors.boardBg, RoundedCornerShape(12.dp))
+                    .border(1.dp, colors.panelBorder, RoundedCornerShape(12.dp))
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onTap = {
@@ -177,20 +265,51 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
                     val cellW = size.width / 10f
                     val cellH = size.height / 20f
 
-                    // Grid cells
+                    // Grid lines/Empty cells
+                    for (row in 0 until 20) {
+                        for (col in 0 until 10) {
+                            drawRect(
+                                color = colors.cellEmpty,
+                                topLeft = Offset(col * cellW, row * cellH),
+                                size = Size(cellW, cellH)
+                            )
+                            drawRect(
+                                color = colors.cellGrid,
+                                topLeft = Offset(col * cellW, row * cellH),
+                                size = Size(cellW, cellH),
+                                style = Stroke(width = 0.5.dp.toPx())
+                            )
+                        }
+                    }
+
+                    // Grid cells with blocks
                     for (row in 0 until 20) {
                         for (col in 0 until 10) {
                             val colorVal = grid[row][col]
                             if (colorVal != 0L) {
+                                val blockColor = Color(colorVal)
+                                val x = col * cellW
+                                val y = row * cellH
+
+                                // Layer 1: Main fill
                                 drawRect(
-                                    color = Color(colorVal),
-                                    topLeft = Offset(col * cellW, row * cellH),
-                                    size = Size(cellW, cellH)
+                                    color = blockColor,
+                                    topLeft = Offset(x + 1f, y + 1f),
+                                    size = Size(cellW - 2f, cellH - 2f)
                                 )
+                                
+                                // Layer 2: Top highlight
                                 drawRect(
-                                    color = Color.White.copy(alpha = 0.25f),
-                                    topLeft = Offset(col * cellW, row * cellH),
-                                    size = Size(cellW, cellH * 0.3f)
+                                    color = Color.White.copy(alpha = 0.30f),
+                                    topLeft = Offset(x + 1f, y + 1f),
+                                    size = Size(cellW - 2f, cellH * 0.28f)
+                                )
+                                
+                                // Layer 3: Bottom shadow
+                                drawRect(
+                                    color = Color.Black.copy(alpha = 0.25f),
+                                    topLeft = Offset(x + 1f, y + cellH * 0.72f),
+                                    size = Size(cellW - 2f, cellH * 0.28f)
                                 )
                             }
                         }
@@ -223,15 +342,27 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
                                 if (piece.matrix[r][c] != 0) {
                                     val px = (currentX + c) * cellW
                                     val py = (currentY + r) * cellH
+                                    val blockColor = Color(piece.color)
+
+                                    // Layer 1: Main fill
                                     drawRect(
-                                        color = Color(piece.color),
-                                        topLeft = Offset(px, py),
-                                        size = Size(cellW, cellH)
+                                        color = blockColor,
+                                        topLeft = Offset(px + 1f, py + 1f),
+                                        size = Size(cellW - 2f, cellH - 2f)
                                     )
+                                    
+                                    // Layer 2: Top highlight
                                     drawRect(
-                                        color = Color.White.copy(alpha = 0.35f),
-                                        topLeft = Offset(px, py),
-                                        size = Size(cellW, cellH * 0.3f)
+                                        color = Color.White.copy(alpha = 0.30f),
+                                        topLeft = Offset(px + 1f, py + 1f),
+                                        size = Size(cellW - 2f, cellH * 0.28f)
+                                    )
+                                    
+                                    // Layer 3: Bottom shadow
+                                    drawRect(
+                                        color = Color.Black.copy(alpha = 0.25f),
+                                        topLeft = Offset(px + 1f, py + cellH * 0.72f),
+                                        size = Size(cellW - 2f, cellH * 0.28f)
                                     )
                                 }
                             }
@@ -242,10 +373,10 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
         }
 
         if (isGameOver) {
-            GameResultOverlay(title = "GAME OVER", score = score, btnText = "RETRY") { viewModel.resetGame() }
+            GameResultOverlay(title = "GAME OVER", score = score, btnText = "RETRY", colors = colors) { viewModel.resetGame() }
         }
         if (isPaused && !isGameOver) {
-            GameResultOverlay(title = "PAUSED", score = score, btnText = "RESUME") { viewModel.togglePause() }
+            GameResultOverlay(title = "PAUSED", score = score, btnText = "RESUME", colors = colors) { viewModel.togglePause() }
         }
 
         if (showEasterEgg) {
@@ -269,42 +400,77 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
 }
 
 @Composable
-private fun StatText(text: String) {
-    Text(
-        text = text,
-        fontSize = 17.sp,
-        fontWeight = FontWeight.ExtraBold,
-        color = Color(0xFF263238)
-    )
+private fun StatItem(label: String, value: String, valueColor: Color, colors: com.example.tetris.ui.theme.TetrisColors) {
+    Column(horizontalAlignment = Alignment.Start) {
+        Text(
+            text = label,
+            fontSize = 9.sp,
+            letterSpacing = 1.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textMuted
+        )
+        Text(
+            text = value,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Black,
+            color = valueColor
+        )
+    }
 }
 
 @Composable
-private fun InfoSection(label: String, piece: TetrisPiece?, onClick: (() -> Unit)? = null) {
+private fun InfoSection(label: String, piece: TetrisPiece?, colors: com.example.tetris.ui.theme.TetrisColors, onClick: (() -> Unit)? = null) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier
     ) {
-        Text(text = label, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF455A64))
+        Text(
+            text = label.uppercase(),
+            fontSize = 9.sp,
+            letterSpacing = 1.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textMuted
+        )
         Spacer(modifier = Modifier.height(4.dp))
         Box(
             modifier = Modifier
                 .size(72.dp)
-                .background(Color.White)
-                .border(1.dp, Color(0xFFB0BEC5)),
+                .shadow(2.dp, RoundedCornerShape(12.dp))
+                .background(colors.panelBg, RoundedCornerShape(12.dp))
+                .border(1.dp, colors.panelBorder, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (piece != null) {
-                Canvas(modifier = Modifier.fillMaxSize().padding(6.dp)) {
+                Canvas(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                     val cellSize = minOf(size.width / 4f, size.height / 4f)
                     val ox = (size.width - piece.matrix[0].size * cellSize) / 2f
                     val oy = (size.height - piece.matrix.size * cellSize) / 2f
                     for (r in piece.matrix.indices) {
                         for (c in piece.matrix[0].indices) {
                             if (piece.matrix[r][c] != 0) {
+                                val blockColor = Color(piece.color)
+                                val x = ox + c * cellSize
+                                val y = oy + r * cellSize
+                                
+                                // Layer 1: Main fill
                                 drawRect(
-                                    color = Color(piece.color),
-                                    topLeft = Offset(ox + c * cellSize, oy + r * cellSize),
+                                    color = blockColor,
+                                    topLeft = Offset(x + 0.5f, y + 0.5f),
                                     size = Size(cellSize - 1f, cellSize - 1f)
+                                )
+                                
+                                // Layer 2: Top highlight
+                                drawRect(
+                                    color = Color.White.copy(alpha = 0.30f),
+                                    topLeft = Offset(x + 0.5f, y + 0.5f),
+                                    size = Size(cellSize - 1f, cellSize * 0.28f)
+                                )
+                                
+                                // Layer 3: Bottom shadow
+                                drawRect(
+                                    color = Color.Black.copy(alpha = 0.25f),
+                                    topLeft = Offset(x + 0.5f, y + cellSize * 0.72f),
+                                    size = Size(cellSize - 1f, cellSize * 0.28f)
                                 )
                             }
                         }
@@ -316,24 +482,49 @@ private fun InfoSection(label: String, piece: TetrisPiece?, onClick: (() -> Unit
 }
 
 @Composable
-private fun GameResultOverlay(title: String, score: Int, btnText: String, onAction: () -> Unit) {
+private fun GameResultOverlay(title: String, score: Int, btnText: String, colors: com.example.tetris.ui.theme.TetrisColors, onAction: () -> Unit) {
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.65f)),
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)),
         contentAlignment = Alignment.Center
     ) {
-        Surface(shape = RoundedCornerShape(20.dp), color = Color.White) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = colors.panelBg,
+            tonalElevation = 8.dp,
+            modifier = Modifier.padding(32.dp)
+        ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(vertical = 32.dp, horizontal = 48.dp)
+                modifier = Modifier.padding(vertical = 32.dp, horizontal = 40.dp)
             ) {
-                Text(text = title, fontSize = 26.sp, fontWeight = FontWeight.Black, color = Color(0xFF1A237E))
+                Text(
+                    text = title,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black,
+                    color = colors.textPrimary
+                )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(text = "Score: $score", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Color(0xFF455A64))
-                Spacer(modifier = Modifier.height(28.dp))
+                Text(
+                    text = "FINAL SCORE",
+                    fontSize = 9.sp,
+                    letterSpacing = 1.sp,
+                    color = colors.textMuted
+                )
+                Text(
+                    text = "$score",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Black,
+                    color = colors.accentCyan
+                )
+                Spacer(modifier = Modifier.height(32.dp))
                 Button(
                     onClick = onAction,
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A237E))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.textPrimary,
+                        contentColor = colors.screenBg
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(text = btnText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }

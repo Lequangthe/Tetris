@@ -24,15 +24,21 @@ class MainActivity : ComponentActivity() {
         viewModel.initPrefs()
 
         setContent {
+            val isDarkTheme = viewModel.themeMode == 1
             val view = LocalView.current
+            
             if (!view.isInEditMode) {
                 SideEffect {
                     val window = (view.context as Activity).window
-                    window.statusBarColor = android.graphics.Color.parseColor("#F8F9FA")
-                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = true
+                    window.statusBarColor = if (isDarkTheme) {
+                        android.graphics.Color.BLACK
+                    } else {
+                        android.graphics.Color.parseColor("#F0F2F5")
+                    }
+                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isDarkTheme
                 }
             }
-            TETRISTheme {
+            TETRISTheme(darkTheme = isDarkTheme) {
                 TetrisApp(viewModel = viewModel)
             }
         }

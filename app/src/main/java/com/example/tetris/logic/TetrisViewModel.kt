@@ -13,6 +13,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.tetris.audio.SoundManager
+import com.example.tetris.audio.BonusFeedback
 import com.example.tetris.audio.TetrisSound
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -68,6 +69,16 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     var showSettings by mutableStateOf(false)
 
+    // ========== POWER-UP STATE ==========
+    var powerUpCooldownEnd by mutableStateOf(0L)
+    var powerUpMessage by mutableStateOf<String?>(null)
+    private var nextPowerUpType by mutableStateOf<String?>(null)
+
+    // ========== BONUS SYSTEM ==========
+    var currentBonus by mutableStateOf<BonusType?>(null)
+        private set
+    private val bonusManager = BonusManager()
+
     // ========== SETTINGS STATE ==========
     var musicVolume by mutableStateOf(0.5f)
     var sfxVolume by mutableStateOf(0.5f)
@@ -75,6 +86,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     var isSfxOn by mutableStateOf(true)
     var isVibrationOn by mutableStateOf(true)
     var isGhostOn by mutableStateOf(true)
+    var themeMode by mutableStateOf(0) // 0 = light, 1 = dark
     var speedLevel by mutableStateOf(1)
 
     private val speedMap = mapOf(0 to 700L, 1 to 500L, 2 to 350L)
@@ -83,6 +95,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     private var prefs: SharedPreferences? = null
 
     private var soundManager: SoundManager? = null
+    private var bonusFeedback: BonusFeedback? = null
 
     private val shapes = listOf(
         TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,1,1,1), intArrayOf(0,0,0,0), intArrayOf(0,0,0,0)), 0xFF00E5F0, "I"),
@@ -104,6 +117,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
         prefs = context.getSharedPreferences("tetris_settings", Context.MODE_PRIVATE)
         loadSettings()
         soundManager = SoundManager(context)
+        bonusFeedback = BonusFeedback(context)
         soundManager?.startBGM()
     }
 
@@ -114,6 +128,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
         isSfxOn = prefs?.getBoolean("sfx_on", true) ?: true
         isVibrationOn = prefs?.getBoolean("vibration_on", true) ?: true
         isGhostOn = prefs?.getBoolean("ghost_on", true) ?: true
+        themeMode = prefs?.getInt("theme_mode", 0) ?: 0
         speedLevel = prefs?.getInt("speed_level", 1) ?: 1
     }
 
@@ -125,6 +140,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
             putBoolean("sfx_on", isSfxOn)
             putBoolean("vibration_on", isVibrationOn)
             putBoolean("ghost_on", isGhostOn)
+            putInt("theme_mode", themeMode)
             putInt("speed_level", speedLevel)
             apply()
         }
@@ -137,6 +153,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
         isSfxOn = true
         isVibrationOn = true
         isGhostOn = true
+        themeMode = 0
         speedLevel = 1
         saveSettings()
     }
@@ -173,8 +190,23 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun spawnNewPiece() {
         if (nextPiece == null) nextPiece = getRandomPiece()
-        currentPiece = nextPiece!!
-        nextPiece = getRandomPiece()
+
+        currentPiece = when (nextPowerUpType) {
+            "BOMB" -> TetrisPiece(
+                matrix = arrayOf(intArrayOf(0, 0, 0, 0), intArrayOf(0, 1, 1, 0), intArrayOf(0, 1, 1, 0), intArrayOf(0, 0, 0, 0)),
+                color = 0xFF333333, // Bomb is dark gray/black
+                name = "BOMB"
+            )
+            "LASER" -> nextPiece!!.copy(name = "LASER", color = 0xFFFF0000)
+            "GHOST" -> nextPiece!!.copy(name = "GHOST")
+            else -> nextPiece!!
+        }
+
+        if (nextPowerUpType == null) {
+            nextPiece = getRandomPiece()
+        }
+        nextPowerUpType = null
+
         currentX = 3
         currentY = 0
         if (collision(currentPiece!!.matrix, currentX, currentY)) {
@@ -190,7 +222,9 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
                     val boardX = x + col
                     val boardY = y + row
                     if (boardX < 0 || boardX >= 10 || boardY >= 20 || boardY < 0) return true
-                    if (boardY >= 0 && grid[boardY][boardX] != 0L) return true
+                    
+                    // GHOST blocks pass through existing grid
+                    if (currentPiece?.name != "GHOST" && boardY >= 0 && grid[boardY][boardX] != 0L) return true
                 }
             }
         }
@@ -200,17 +234,80 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     private fun mergePiece() {
         currentPiece?.let { piece ->
             val newGrid = grid.map { it.copyOf() }.toTypedArray()
-            for (row in piece.matrix.indices) {
-                for (col in piece.matrix[0].indices) {
-                    if (piece.matrix[row][col] != 0) {
-                        val x = currentX + col
-                        val y = currentY + row
-                        if (y in 0 until 20 && x in 0 until 10) {
-                            newGrid[y][x] = piece.color
+            
+            when (piece.name) {
+                "GHOST" -> {
+                    // Ghost piece fills lowest available cell in each column it covers
+                    for (col in piece.matrix[0].indices) {
+                        var hasBlockInCol = false
+                        for (row in piece.matrix.indices) {
+                            if (piece.matrix[row][col] != 0) {
+                                hasBlockInCol = true
+                                break
+                            }
+                        }
+                        if (hasBlockInCol) {
+                            val boardX = currentX + col
+                            if (boardX in 0 until 10) {
+                                for (r in 19 downTo 0) {
+                                    if (newGrid[r][boardX] == 0L) {
+                                        newGrid[r][boardX] = piece.color
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "LASER" -> {
+                    // Laser clears all targeted columns
+                    for (col in piece.matrix[0].indices) {
+                        var hasBlockInCol = false
+                        for (row in piece.matrix.indices) {
+                            if (piece.matrix[row][col] != 0) {
+                                hasBlockInCol = true
+                                break
+                            }
+                        }
+                        if (hasBlockInCol) {
+                            val boardX = currentX + col
+                            if (boardX in 0 until 10) {
+                                for (r in 0 until 20) {
+                                    newGrid[r][boardX] = 0L
+                                }
+                            }
+                        }
+                    }
+                    playSound("clear")
+                }
+                "BOMB" -> {
+                    // Radius 2 explosion
+                    for (dr in -2..2) {
+                        for (dc in -2..2) {
+                            val nr = currentY + dr
+                            val nc = currentX + dc
+                            if (nr in 0 until 20 && nc in 0 until 10) {
+                                newGrid[nr][nc] = 0L
+                            }
+                        }
+                    }
+                    playSound("clear")
+                }
+                else -> {
+                    for (row in piece.matrix.indices) {
+                        for (col in piece.matrix[0].indices) {
+                            if (piece.matrix[row][col] != 0) {
+                                val x = currentX + col
+                                val y = currentY + row
+                                if (y in 0 until 20 && x in 0 until 10) {
+                                    newGrid[y][x] = piece.color
+                                }
+                            }
                         }
                     }
                 }
             }
+
             grid = newGrid
             playSound("lock")
             clearLines()
@@ -240,7 +337,41 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
             val points = mapOf(1 to 40, 2 to 100, 3 to 300, 4 to 1200)
             score += points[rowsCleared] ?: 40
             lines += rowsCleared
+
+            // Thưởng bonus khi ăn được 4 dòng (Tetris)
+            if (rowsCleared >= 4) {
+                currentBonus = BonusType.values().random()
+                powerUpMessage = "NHẬN BONUS: ${currentBonus?.displayName}"
+            }
         }
+    }
+
+    fun useBonus() {
+        val bonus = currentBonus ?: return
+        
+        // Phát âm thanh và rung
+        if (isSfxOn) {
+            bonusFeedback?.playSound(bonus)
+        }
+        if (isVibrationOn) {
+            bonusFeedback?.vibrate(bonus)
+        }
+
+        // Tạo bản sao của grid để modify
+        val newGrid = grid.map { it.copyOf() }.toTypedArray()
+        
+        val points = bonusManager.activateBonus(bonus, newGrid) {
+            // Hiệu ứng hoàn tất
+            println("Bonus ${bonus.displayName} activated!")
+        }
+        
+        grid = newGrid
+        score += points
+        lines += bonus.extraLines
+        currentBonus = null // Reset bonus sau khi dùng
+        
+        // Kiểm tra xem có xóa thêm được dòng nào không sau khi bonus tác động
+        clearLines()
     }
 
     fun moveLeft() {
@@ -353,6 +484,37 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
         soundManager?.bgmEnabled = enabled
         if (!enabled) soundManager?.pauseBGM()
         else soundManager?.resumeBGM()
+    }
+
+    fun activatePowerUp() {
+        val now = System.currentTimeMillis()
+        val remaining = powerUpCooldownEnd - now
+
+        if (remaining > 0) {
+            val taunts = listOf(
+                "Từ từ thôi bạn ơi... còn ${remaining/60000} phút nữa 😏",
+                "Ăn gian vừa thôi nha! ⏳",
+                "Máy chưa sạc lại được đâu bạn ơi 🔋",
+                "Kiên nhẫn là đức tính tốt 🧘",
+                "Bấm mãi cũng không ra đâu 😄"
+            )
+            powerUpMessage = taunts.random()
+            viewModelScope.launch {
+                delay(2000)
+                powerUpMessage = null
+            }
+            return
+        }
+
+        val powers = listOf("LASER", "BOMB", "GHOST")
+        nextPowerUpType = powers.random()
+
+        powerUpCooldownEnd = System.currentTimeMillis() + 5 * 60 * 1000L
+        powerUpMessage = "💥 Power-up kích hoạt!"
+        viewModelScope.launch {
+            delay(1500)
+            powerUpMessage = null
+        }
     }
 
     private fun startGameLoop() {

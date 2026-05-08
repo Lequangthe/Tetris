@@ -21,8 +21,10 @@ fun SettingsScreen(viewModel: TetrisViewModel, onBack: () -> Unit) {
     var isVibrationOn by remember { mutableStateOf(viewModel.isVibrationOn) }
     var isGhostOn by remember { mutableStateOf(viewModel.isGhostOn) }
     var speedLevel by remember { mutableStateOf(viewModel.speedLevel) }
+    var themeMode by remember { mutableStateOf(viewModel.themeMode) }
 
     val speedOptions = listOf("Chậm", "Trung bình", "Nhanh")
+    val themeOptions = listOf("☀️ Sáng", "🌙 Tối")
 
     Scaffold(
         topBar = {
@@ -119,6 +121,29 @@ fun SettingsScreen(viewModel: TetrisViewModel, onBack: () -> Unit) {
             }
 
             item {
+                Text("Giao diện", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Chủ đề màu")
+                    Spacer(modifier = Modifier.weight(1f))
+                    SingleChoiceSegmentedButtonRow {
+                        themeOptions.forEachIndexed { index, label ->
+                            SegmentedButton(
+                                selected = themeMode == index,
+                                onClick = {
+                                    themeMode = index
+                                    viewModel.themeMode = index
+                                    viewModel.saveSettings()
+                                },
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = themeOptions.size),
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
                 Text("Tốc độ rơi", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 SingleChoiceSegmentedButtonRow(
@@ -148,6 +173,7 @@ fun SettingsScreen(viewModel: TetrisViewModel, onBack: () -> Unit) {
                         isSfxOn = viewModel.isSfxOn
                         isVibrationOn = viewModel.isVibrationOn
                         isGhostOn = viewModel.isGhostOn
+                        themeMode = viewModel.themeMode
                         speedLevel = viewModel.speedLevel
                         viewModel.saveSettings()
                     },
