@@ -1,59 +1,31 @@
 package com.example.tetris.logic
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
-import android.content.SharedPreferences
-import android.media.AudioManager
-import android.media.MediaPlayer
-import android.media.ToneGenerator
+import android.os.Vibrator
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.tetris.audio.SoundManager
 import com.example.tetris.audio.BonusFeedback
+import com.example.tetris.audio.SoundManager
 import com.example.tetris.audio.TetrisSound
+import com.example.tetris.ui.effects.BonusEffectHelper
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-data class TetrisPiece(
-    val matrix: Array<IntArray>,
-    val color: Long,
-    val name: String
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is TetrisPiece) return false
-        return name == other.name && color == other.color &&
-               matrix.contentDeepEquals(other.matrix)
-    }
-    override fun hashCode(): Int {
-        var result = matrix.contentDeepHashCode()
-        result = 31 * result + color.hashCode()
-        result = 31 * result + name.hashCode()
-        return result
-    }
-}
-
 class TetrisViewModel(application: Application) : AndroidViewModel(application) {
 
-    // ========== GAME STATE (KHỞI TẠO ĐÚNG CÁCH) ==========
+    // ========== GAME STATE ==========
     var grid by mutableStateOf(Array(20) { Array(10) { 0L } })
         private set
 
-    var currentPiece by mutableStateOf<TetrisPiece?>(null)
-        private set
-
-    var currentX by mutableStateOf(3)
-        private set
-
-    var currentY by mutableStateOf(0)
-        private set
-
-    var nextPiece by mutableStateOf<TetrisPiece?>(null)
-        private set
+    private val _effectEvent = MutableSharedFlow<EffectType>(extraBufferCapacity = 10)
+    val effectEvent = _effectEvent.asSharedFlow()
 
     var score by mutableStateOf(0)
         private set
@@ -64,38 +36,30 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     var isGameOver by mutableStateOf(false)
         private set
 
-    var isPaused by mutableStateOf(false)
-        private set
-
+    // ========== SETTINGS & UI STATE ==========
+    var themeMode by mutableStateOf(0)
     var showSettings by mutableStateOf(false)
-
-    // ========== POWER-UP STATE ==========
-    var powerUpCooldownEnd by mutableStateOf(0L)
-    var powerUpMessage by mutableStateOf<String?>(null)
-    private var nextPowerUpType by mutableStateOf<String?>(null)
-
-    // ========== BONUS SYSTEM ==========
-    var currentBonus by mutableStateOf<BonusType?>(null)
-        private set
-    private val bonusManager = BonusManager()
-
-    // ========== SETTINGS STATE ==========
     var musicVolume by mutableStateOf(0.5f)
     var sfxVolume by mutableStateOf(0.5f)
     var isMusicOn by mutableStateOf(true)
+    var isGhostOn by mutableStateOf(true)
+    var speedLevel by mutableStateOf(1)
+    var isPaused by mutableStateOf(false)
+    var isAutoFall by mutableStateOf(false) // Mặc định tắt để bạn trải nghiệm kiểu "hiện đại"
+
+    var currentPiece by mutableStateOf<TetrisPiece?>(null)
+    var nextPiece by mutableStateOf<TetrisPiece?>(null)
+    var currentX by mutableStateOf(3)
+    var currentY by mutableStateOf(0)
+
+    var powerUpMessage by mutableStateOf<String?>(null)
+    var powerUpCooldownEnd by mutableStateOf(0L)
+
     var isSfxOn by mutableStateOf(true)
     var isVibrationOn by mutableStateOf(true)
-    var isGhostOn by mutableStateOf(true)
-    var themeMode by mutableStateOf(0) // 0 = light, 1 = dark
-    var speedLevel by mutableStateOf(1)
-
-    private val speedMap = mapOf(0 to 700L, 1 to 500L, 2 to 350L)
-    private var gameJob: kotlinx.coroutines.Job? = null
-    private var lockJob: kotlinx.coroutines.Job? = null
-    private var prefs: SharedPreferences? = null
 
     private var soundManager: SoundManager? = null
-    private var bonusFeedback: BonusFeedback? = null
+    private var currentActivity: Activity? = null
 
     private val shapes = listOf(
         TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,1,1,1), intArrayOf(0,0,0,0), intArrayOf(0,0,0,0)), 0xFF00E5F0, "I"),
@@ -108,217 +72,242 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     init {
-        android.util.Log.d("TetrisVM", "ViewModel INITIALIZED")
-        startGame()
+        resetGame()
     }
 
     fun initPrefs() {
-        val context = getApplication<Application>()
-        prefs = context.getSharedPreferences("tetris_settings", Context.MODE_PRIVATE)
-        loadSettings()
-        soundManager = SoundManager(context)
-        bonusFeedback = BonusFeedback(context)
-        soundManager?.startBGM()
+        val prefs = getApplication<Application>().getSharedPreferences("tetris_prefs", Context.MODE_PRIVATE)
+        themeMode = prefs.getInt("themeMode", 0)
+        musicVolume = prefs.getFloat("musicVolume", 0.5f)
+        sfxVolume = prefs.getFloat("sfxVolume", 0.5f)
+        isMusicOn = prefs.getBoolean("isMusicOn", true)
+        isSfxOn = prefs.getBoolean("isSfxOn", true)
+        isVibrationOn = prefs.getBoolean("isVibrationOn", true)
+        isGhostOn = prefs.getBoolean("isGhostOn", true)
+        speedLevel = prefs.getInt("speedLevel", 1)
+        
+        ensureManagersInitialized()
     }
 
-    private fun loadSettings() {
-        musicVolume = prefs?.getFloat("music_volume", 0.5f) ?: 0.5f
-        sfxVolume = prefs?.getFloat("sfx_volume", 0.5f) ?: 0.5f
-        isMusicOn = prefs?.getBoolean("music_on", true) ?: true
-        isSfxOn = prefs?.getBoolean("sfx_on", true) ?: true
-        isVibrationOn = prefs?.getBoolean("vibration_on", true) ?: true
-        isGhostOn = prefs?.getBoolean("ghost_on", true) ?: true
-        themeMode = prefs?.getInt("theme_mode", 0) ?: 0
-        speedLevel = prefs?.getInt("speed_level", 1) ?: 1
+    private fun ensureManagersInitialized() {
+        if (soundManager == null) {
+            soundManager = SoundManager(getApplication())
+            soundManager?.bgmEnabled = isMusicOn
+            soundManager?.startBGM()
+        }
     }
 
     fun saveSettings() {
-        prefs?.edit()?.apply {
-            putFloat("music_volume", musicVolume)
-            putFloat("sfx_volume", sfxVolume)
-            putBoolean("music_on", isMusicOn)
-            putBoolean("sfx_on", isSfxOn)
-            putBoolean("vibration_on", isVibrationOn)
-            putBoolean("ghost_on", isGhostOn)
-            putInt("theme_mode", themeMode)
-            putInt("speed_level", speedLevel)
+        val prefs = getApplication<Application>().getSharedPreferences("tetris_prefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putInt("themeMode", themeMode)
+            putFloat("musicVolume", musicVolume)
+            putFloat("sfxVolume", sfxVolume)
+            putBoolean("isMusicOn", isMusicOn)
+            putBoolean("isSfxOn", isSfxOn)
+            putBoolean("isVibrationOn", isVibrationOn)
+            putBoolean("isGhostOn", isGhostOn)
+            putInt("speedLevel", speedLevel)
             apply()
         }
     }
 
     fun resetToDefaultSettings() {
+        themeMode = 0
         musicVolume = 0.5f
         sfxVolume = 0.5f
         isMusicOn = true
         isSfxOn = true
         isVibrationOn = true
         isGhostOn = true
-        themeMode = 0
         speedLevel = 1
         saveSettings()
     }
 
-    fun changeSpeed(newLevel: Int) {
-        speedLevel = newLevel
+    fun onResume() {
+        soundManager?.resumeBGM()
+        isPaused = false
+    }
+
+    fun onPause() {
+        soundManager?.pauseBGM()
+        isPaused = true
+    }
+
+    fun setSoundManagerBGM(enabled: Boolean) {
+        soundManager?.bgmEnabled = enabled
+    }
+
+    fun changeSpeed(level: Int) {
+        speedLevel = level
         saveSettings()
-        if (!isPaused && !isGameOver) {
-            gameJob?.cancel()
-            startGameLoop()
+    }
+
+    fun togglePause() {
+        isPaused = !isPaused
+        if (isPaused) soundManager?.pauseBGM() else soundManager?.resumeBGM()
+    }
+
+    fun toggleAutoFall() {
+        isAutoFall = !isAutoFall
+    }
+
+    private var gameJob: kotlinx.coroutines.Job? = null
+    private fun startGameLoop() {
+        gameJob?.cancel()
+        gameJob = viewModelScope.launch {
+            while (true) {
+                val delayTime = when (speedLevel) {
+                    0 -> 1000L
+                    1 -> 600L
+                    2 -> 300L
+                    else -> 600L
+                }
+                delay(delayTime)
+                if (isAutoFall && !isPaused && !isGameOver) {
+                    moveDown()
+                }
+            }
         }
     }
 
-    fun startGame() {
-        resetGame()
+    fun init(activity: Activity) {
+        currentActivity = activity
+        ensureManagersInitialized()
+        startGameLoop()
     }
 
     fun resetGame() {
-        android.util.Log.d("TetrisVM", "resetGame called")
         grid = Array(20) { Array(10) { 0L } }
         score = 0
         lines = 0
         isGameOver = false
         isPaused = false
-        nextPiece = getRandomPiece()
-        spawnNewPiece()
-        gameJob?.cancel()
-        startGameLoop()
+        spawnPiece()
     }
 
-    private fun getRandomPiece(): TetrisPiece {
-        return shapes.random()
-    }
-
-    private fun spawnNewPiece() {
-        if (nextPiece == null) nextPiece = getRandomPiece()
-
-        currentPiece = when (nextPowerUpType) {
-            "BOMB" -> TetrisPiece(
-                matrix = arrayOf(intArrayOf(0, 0, 0, 0), intArrayOf(0, 1, 1, 0), intArrayOf(0, 1, 1, 0), intArrayOf(0, 0, 0, 0)),
-                color = 0xFF333333, // Bomb is dark gray/black
-                name = "BOMB"
-            )
-            "LASER" -> nextPiece!!.copy(name = "LASER", color = 0xFFFF0000)
-            "GHOST" -> nextPiece!!.copy(name = "GHOST")
-            else -> nextPiece!!
-        }
-
-        if (nextPowerUpType == null) {
-            nextPiece = getRandomPiece()
-        }
-        nextPowerUpType = null
-
+    private fun spawnPiece() {
+        currentPiece = nextPiece ?: shapes.random()
+        nextPiece = shapes.random()
         currentX = 3
         currentY = 0
-        if (collision(currentPiece!!.matrix, currentX, currentY)) {
+        
+        if (checkCollision(currentX, currentY, currentPiece!!)) {
             isGameOver = true
-            gameJob?.cancel()
+            if (isSfxOn) soundManager?.play(TetrisSound.GAME_OVER)
         }
     }
 
-    private fun collision(matrix: Array<IntArray>, x: Int, y: Int): Boolean {
-        for (row in matrix.indices) {
-            for (col in matrix[0].indices) {
-                if (matrix[row][col] != 0) {
-                    val boardX = x + col
-                    val boardY = y + row
-                    if (boardX < 0 || boardX >= 10 || boardY >= 20 || boardY < 0) return true
-                    
-                    // GHOST blocks pass through existing grid
-                    if (currentPiece?.name != "GHOST" && boardY >= 0 && grid[boardY][boardX] != 0L) return true
+    private fun checkCollision(x: Int, y: Int, piece: TetrisPiece): Boolean {
+        for (r in piece.matrix.indices) {
+            for (c in piece.matrix[0].indices) {
+                if (piece.matrix[r][c] != 0) {
+                    val newX = x + c
+                    val newY = y + r
+                    if (newX !in 0 until 10 || newY >= 20 || (newY >= 0 && grid[newY][newX] != 0L)) {
+                        return true
+                    }
                 }
             }
         }
         return false
     }
 
-    private fun mergePiece() {
-        currentPiece?.let { piece ->
-            val newGrid = grid.map { it.copyOf() }.toTypedArray()
-            
-            when (piece.name) {
-                "GHOST" -> {
-                    // Ghost piece fills lowest available cell in each column it covers
-                    for (col in piece.matrix[0].indices) {
-                        var hasBlockInCol = false
-                        for (row in piece.matrix.indices) {
-                            if (piece.matrix[row][col] != 0) {
-                                hasBlockInCol = true
-                                break
-                            }
-                        }
-                        if (hasBlockInCol) {
-                            val boardX = currentX + col
-                            if (boardX in 0 until 10) {
-                                for (r in 19 downTo 0) {
-                                    if (newGrid[r][boardX] == 0L) {
-                                        newGrid[r][boardX] = piece.color
-                                        break
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                "LASER" -> {
-                    // Laser clears all targeted columns
-                    for (col in piece.matrix[0].indices) {
-                        var hasBlockInCol = false
-                        for (row in piece.matrix.indices) {
-                            if (piece.matrix[row][col] != 0) {
-                                hasBlockInCol = true
-                                break
-                            }
-                        }
-                        if (hasBlockInCol) {
-                            val boardX = currentX + col
-                            if (boardX in 0 until 10) {
-                                for (r in 0 until 20) {
-                                    newGrid[r][boardX] = 0L
-                                }
-                            }
-                        }
-                    }
-                    playSound("clear")
-                }
-                "BOMB" -> {
-                    // Radius 2 explosion
-                    for (dr in -2..2) {
-                        for (dc in -2..2) {
-                            val nr = currentY + dr
-                            val nc = currentX + dc
-                            if (nr in 0 until 20 && nc in 0 until 10) {
-                                newGrid[nr][nc] = 0L
-                            }
-                        }
-                    }
-                    playSound("clear")
-                }
-                else -> {
-                    for (row in piece.matrix.indices) {
-                        for (col in piece.matrix[0].indices) {
-                            if (piece.matrix[row][col] != 0) {
-                                val x = currentX + col
-                                val y = currentY + row
-                                if (y in 0 until 20 && x in 0 until 10) {
-                                    newGrid[y][x] = piece.color
-                                }
-                            }
-                        }
+    fun moveLeft() {
+        if (isGameOver || isPaused) return
+        if (!checkCollision(currentX - 1, currentY, currentPiece!!)) {
+            currentX--
+            if (isSfxOn) soundManager?.play(TetrisSound.MOVE)
+        }
+    }
+
+    fun moveRight() {
+        if (isGameOver || isPaused) return
+        if (!checkCollision(currentX + 1, currentY, currentPiece!!)) {
+            currentX++
+            if (isSfxOn) soundManager?.play(TetrisSound.MOVE)
+        }
+    }
+
+    fun rotatePiece() {
+        if (isGameOver || isPaused || currentPiece == null) return
+        val matrix = currentPiece!!.matrix
+        val n = matrix.size
+        val rotated = Array(n) { IntArray(n) }
+        for (i in 0 until n) {
+            for (j in 0 until n) {
+                rotated[j][n - 1 - i] = matrix[i][j]
+            }
+        }
+        val newPiece = currentPiece!!.copy(matrix = rotated)
+        
+        // Wall-kick: Thử các vị trí lân cận để xoay nếu bị sát vách
+        val offsets = listOf(0, -1, 1, -2, 2)
+        for (offset in offsets) {
+            if (!checkCollision(currentX + offset, currentY, newPiece)) {
+                currentX += offset
+                currentPiece = newPiece
+                if (isSfxOn) soundManager?.play(TetrisSound.ROTATE)
+                return
+            }
+        }
+    }
+
+    fun hardDrop() {
+        if (isGameOver || isPaused) return
+        while (!checkCollision(currentX, currentY + 1, currentPiece!!)) {
+            currentY++
+        }
+        if (isSfxOn) soundManager?.play(TetrisSound.LOCK)
+        lockPiece()
+    }
+
+    fun getGhostY(): Int {
+        if (currentPiece == null) return 0
+        var gy = currentY
+        while (!checkCollision(currentX, gy + 1, currentPiece!!)) {
+            gy++
+        }
+        return gy
+    }
+
+    fun moveDown() {
+        if (isGameOver || isPaused || currentPiece == null) return
+        if (!checkCollision(currentX, currentY + 1, currentPiece!!)) {
+            currentY++
+        } else {
+            lockPiece()
+        }
+    }
+
+    private fun lockPiece() {
+        val piece = currentPiece ?: return
+        val newGrid = grid.map { it.copyOf() }.toTypedArray()
+        for (r in piece.matrix.indices) {
+            for (c in piece.matrix[0].indices) {
+                if (piece.matrix[r][c] != 0) {
+                    val gx = currentX + c
+                    val gy = currentY + r
+                    if (gy in 0 until 20 && gx in 0 until 10) {
+                        newGrid[gy][gx] = piece.color
                     }
                 }
             }
-
-            grid = newGrid
-            playSound("lock")
-            clearLines()
-            spawnNewPiece()
         }
+        grid = newGrid
+        clearLines()
+        spawnPiece()
+    }
+
+    fun activatePowerUp() {
+        // Giữ lại khung nhưng có thể bỏ nội dung nếu bạn không dùng đến
     }
 
     private fun clearLines() {
         val newGrid = grid.map { it.copyOf() }.toTypedArray()
         var rowsCleared = 0
         var row = 19
+
         while (row >= 0) {
             if (newGrid[row].all { it != 0L }) {
                 for (r in row downTo 1) {
@@ -326,242 +315,48 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 newGrid[0] = Array(10) { 0L }
                 rowsCleared++
-                // Không tăng row, kiểm tra lại vị trí hiện tại
             } else {
                 row--
             }
         }
+
         if (rowsCleared > 0) {
             grid = newGrid
-            playSound("clear")
             val points = mapOf(1 to 40, 2 to 100, 3 to 300, 4 to 1200)
             score += points[rowsCleared] ?: 40
             lines += rowsCleared
 
-            // Thưởng bonus khi ăn được 4 dòng (Tetris)
-            if (rowsCleared >= 4) {
-                currentBonus = BonusType.values().random()
-                powerUpMessage = "NHẬN BONUS: ${currentBonus?.displayName}"
-            }
-        }
-    }
+            if (isSfxOn) soundManager?.play(TetrisSound.CLEAR)
 
-    fun useBonus() {
-        val bonus = currentBonus ?: return
-        
-        // Phát âm thanh và rung
-        if (isSfxOn) {
-            bonusFeedback?.playSound(bonus)
-        }
-        if (isVibrationOn) {
-            bonusFeedback?.vibrate(bonus)
-        }
-
-        // Tạo bản sao của grid để modify
-        val newGrid = grid.map { it.copyOf() }.toTypedArray()
-        
-        val points = bonusManager.activateBonus(bonus, newGrid) {
-            // Hiệu ứng hoàn tất
-            println("Bonus ${bonus.displayName} activated!")
-        }
-        
-        grid = newGrid
-        score += points
-        lines += bonus.extraLines
-        currentBonus = null // Reset bonus sau khi dùng
-        
-        // Kiểm tra xem có xóa thêm được dòng nào không sau khi bonus tác động
-        clearLines()
-    }
-
-    fun moveLeft() {
-        if (isGameOver || isPaused) return
-        currentPiece?.let {
-            if (!collision(it.matrix, currentX - 1, currentY)) {
-                currentX--
-                playSound("move")
-                resetLockDelay()
-            }
-        }
-    }
-
-    fun moveRight() {
-        if (isGameOver || isPaused) return
-        currentPiece?.let {
-            if (!collision(it.matrix, currentX + 1, currentY)) {
-                currentX++
-                playSound("move")
-                resetLockDelay()
-            }
-        }
-    }
-
-    fun rotatePiece() {
-        if (isGameOver || isPaused) return
-        val piece = currentPiece ?: return
-        val rotated = Array(4) { IntArray(4) }
-        for (i in 0..3) for (j in 0..3) rotated[j][3-i] = piece.matrix[i][j]
-
-        val kicks = listOf(0 to 0, 1 to 0, -1 to 0, 2 to 0, -2 to 0)
-        for ((dx, dy) in kicks) {
-            if (!collision(rotated, currentX + dx, currentY + dy)) {
-                currentPiece = piece.copy(matrix = rotated)
-                currentX += dx
-                currentY += dy
-                playSound("rotate")
-                resetLockDelay()
-                return
-            }
-        }
-        // All kicks failed — do nothing
-    }
-
-    private fun resetLockDelay() {
-        lockJob?.cancel()
-        currentPiece?.let {
-            if (collision(it.matrix, currentX, currentY + 1)) {
-                lockJob = viewModelScope.launch {
-                    delay(500L)
-                    mergePiece()
-                }
-            }
-        }
-    }
-
-    fun hardDrop() {
-        if (isGameOver || isPaused) return
-        lockJob?.cancel()
-        while (!collision(currentPiece!!.matrix, currentX, currentY + 1)) {
-            currentY++
-        }
-        mergePiece()
-    }
-
-    fun movePieceDown() {
-        if (isGameOver || isPaused) return
-        currentPiece?.let {
-            if (!collision(it.matrix, currentX, currentY + 1)) {
-                currentY++
-                lockJob?.cancel()
-            } else {
-                if (lockJob == null || !lockJob!!.isActive) {
-                    resetLockDelay()
-                }
-            }
-        }
-    }
-
-    fun togglePause() {
-        if (!isGameOver) {
-            isPaused = !isPaused
-            if (!isPaused) {
-                startGameLoop()
-                soundManager?.resumeBGM()
-            } else {
-                gameJob?.cancel()
-                soundManager?.pauseBGM()
-            }
-        }
-    }
-
-    fun onResume() {
-        if (soundManager?.bgmEnabled == true) {
-            soundManager?.resumeBGM()
-        }
-        if (!isGameOver && !isPaused) startGameLoop()
-    }
-
-    fun onPause() {
-        soundManager?.pauseBGM()
-        gameJob?.cancel()
-    }
-
-    fun onDestroy() {
-        soundManager?.release()
-    }
-
-    fun setSoundManagerBGM(enabled: Boolean) {
-        soundManager?.bgmEnabled = enabled
-        if (!enabled) soundManager?.pauseBGM()
-        else soundManager?.resumeBGM()
-    }
-
-    fun activatePowerUp() {
-        val now = System.currentTimeMillis()
-        val remaining = powerUpCooldownEnd - now
-
-        if (remaining > 0) {
-            val taunts = listOf(
-                "Từ từ thôi bạn ơi... còn ${remaining/60000} phút nữa 😏",
-                "Ăn gian vừa thôi nha! ⏳",
-                "Máy chưa sạc lại được đâu bạn ơi 🔋",
-                "Kiên nhẫn là đức tính tốt 🧘",
-                "Bấm mãi cũng không ra đâu 😄"
-            )
-            powerUpMessage = taunts.random()
             viewModelScope.launch {
-                delay(2000)
-                powerUpMessage = null
-            }
-            return
-        }
-
-        val powers = listOf("LASER", "BOMB", "GHOST")
-        nextPowerUpType = powers.random()
-
-        powerUpCooldownEnd = System.currentTimeMillis() + 5 * 60 * 1000L
-        powerUpMessage = "💥 Power-up kích hoạt!"
-        viewModelScope.launch {
-            delay(1500)
-            powerUpMessage = null
-        }
-    }
-
-    private fun startGameLoop() {
-        android.util.Log.d("TetrisVM", "startGameLoop called, speed=${speedMap[speedLevel]}")
-        gameJob?.cancel()
-        gameJob = viewModelScope.launch {
-            while (!isGameOver && !isPaused) {
-                delay(speedMap[speedLevel] ?: 500L)
-                android.util.Log.d("TetrisVM", "Gravity tick")
-                movePieceDown()
+                _effectEvent.emit(EffectType.LINE_CLEAR)
             }
         }
-    }
-
-    fun getGhostY(): Int {
-        if (!isGhostOn || currentPiece == null) return currentY
-        var ghostY = currentY
-        while (!collision(currentPiece!!.matrix, currentX, ghostY + 1)) {
-            ghostY++
-        }
-        return ghostY
-    }
-
-    fun playMusic() {
-        soundManager?.resumeBGM()
-    }
-
-    fun stopMusic() {
-        soundManager?.pauseBGM()
-    }
-
-    fun playSound(name: String) {
-        if (!isSfxOn) return
-        val sound = when(name) {
-            "move"     -> TetrisSound.MOVE
-            "rotate"   -> TetrisSound.ROTATE
-            "lock"     -> TetrisSound.LOCK
-            "clear"    -> TetrisSound.CLEAR
-            "gameover" -> TetrisSound.GAME_OVER
-            else       -> return
-        }
-        soundManager?.play(sound)
     }
 
     override fun onCleared() {
         super.onCleared()
-        gameJob?.cancel()
-        onDestroy()
+        soundManager?.release()
+    }
+}
+
+// ========== DATA CLASS ==========
+data class TetrisPiece(
+    val matrix: Array<IntArray>,
+    val color: Long,
+    val name: String
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is TetrisPiece) return false
+        return name == other.name && color == other.color &&
+                matrix.contentDeepEquals(other.matrix)
+    }
+
+    override fun hashCode(): Int {
+        var result = matrix.contentDeepHashCode()
+        result = 31 * result + color.hashCode()
+        result = 31 * result + name.hashCode()
+        return result
     }
 }

@@ -3,50 +3,56 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16.dp"
-    android:background="#121212">
+    android:padding="16dp"
+    android:background="#1a1a2e">
 
+    <!-- Header Score & Lines -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center">
+        android:gravity="center"
+        android:padding="16dp">
 
         <TextView
             android:id="@+id/tvScore"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="SCORE: 0"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <View
-            android:layout_width="32dp"
-            android:layout_height="0dp" />
+            android:textSize="24sp"
+            android:textColor="#ffd966"
+            android:textStyle="bold"
+            android:gravity="center"/>
 
         <TextView
             android:id="@+id/tvLines"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="LINES: 0"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp"
-            android:textStyle="bold" />
+            android:textSize="24sp"
+            android:textColor="#ffd966"
+            android:textStyle="bold"
+            android:gravity="center"/>
     </LinearLayout>
 
+    <!-- RecyclerView danh sách bonus -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rvBonuses"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="16dp" />
+        android:padding="8dp"/>
 
+    <!-- Nút random bonus -->
     <Button
         android:id="@+id/btnRandomBonus"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Random Bonus"
-        android:layout_marginTop="16dp" />
+        android:layout_gravity="center"
+        android:text="🎲 RANDOM BONUS"
+        android:padding="12dp"
+        android:layout_margin="16dp"/>
 
 </LinearLayout>

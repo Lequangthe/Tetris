@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         viewModel.initPrefs()
+        viewModel.init(this)
 
         setContent {
             val isDarkTheme = viewModel.themeMode == 1
@@ -52,10 +53,5 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         viewModel.onPause()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        viewModel.onDestroy()
     }
 }
