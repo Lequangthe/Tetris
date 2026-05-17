@@ -44,8 +44,7 @@ fun TetrisApp(viewModel: TetrisViewModel) {
         } else {
             TetrisScreen(
                 viewModel = viewModel,
-                onSettingsClick = { viewModel.showSettings = true },
-                isDark = viewModel.themeMode == 1
+                onSettingsClick = { viewModel.showSettings = true }
             )
         }
     }

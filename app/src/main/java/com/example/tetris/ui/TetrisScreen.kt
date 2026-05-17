@@ -54,7 +54,7 @@ data class Particle(
 )
 
 @Composable
-fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit, isDark: Boolean) {
+fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit) {
     val grid          = viewModel.grid
     val currentPiece  = viewModel.currentPiece
     val currentX      = viewModel.currentX
@@ -161,7 +161,7 @@ fun TetrisScreen(viewModel: TetrisViewModel, onSettingsClick: () -> Unit, isDark
         "${r / 60000}:${String.format(Locale.ROOT, "%02d", (r % 60000) / 1000)}"
     } else null
 
-    val colors = if (isDark) com.example.tetris.ui.theme.DarkTokens else com.example.tetris.ui.theme.LightTokens
+    val colors = LocalTetrisColors.current
 
     Box(
         modifier = Modifier

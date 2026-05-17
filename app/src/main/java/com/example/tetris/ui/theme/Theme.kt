@@ -19,6 +19,47 @@ data class TetrisColors(
     val accentAmber: Color
 )
 
+// Bảng màu Tetromino tương ứng với từng theme
+data class TetrominoPalette(
+    val I: Long,
+    val O: Long,
+    val T: Long,
+    val S: Long,
+    val Z: Long,
+    val L: Long,
+    val J: Long
+)
+
+val ClassicPalette = TetrominoPalette(
+    I = 0xFF00FFFF, // Cyan
+    O = 0xFFFFFF00, // Yellow
+    T = 0xFF800080, // Purple
+    S = 0xFF00FF00, // Green
+    Z = 0xFFFF0000, // Red
+    L = 0xFFFFA500, // Orange
+    J = 0xFF0000FF  // Blue
+)
+
+val NeonPalette = TetrominoPalette(
+    I = 0xFF00E5F0,
+    O = 0xFFF7E476,
+    T = 0xFFCF6FDD,
+    S = 0xFF6FCF97,
+    Z = 0xFFE66767,
+    L = 0xFFF2A65A,
+    J = 0xFF5A8DF2
+)
+
+val MinimalistPalette = TetrominoPalette(
+    I = 0xFF4A4A4A,
+    O = 0xFF5E5E5E,
+    T = 0xFF727272,
+    S = 0xFF868686,
+    Z = 0xFF9A9A9A,
+    L = 0xFFAEAEAE,
+    J = 0xFFC2C2C2
+)
+
 val LightTokens = TetrisColors(
     screenBg = Color(0xFFF0F2F5),
     boardBg = Color(0xFFE8EAF0),
@@ -45,14 +86,34 @@ val DarkTokens = TetrisColors(
     accentAmber = Color(0xFFFFB300)
 )
 
+val CyberpunkTokens = TetrisColors(
+    screenBg = Color(0xFF0B001F),
+    boardBg = Color(0xFF1B003F),
+    cellEmpty = Color(0xFF2B005F),
+    cellGrid = Color(0xFF3B007F),
+    panelBg = Color(0xFF1B003F),
+    panelBorder = Color(0xFFFA00FF),
+    textPrimary = Color(0xFFFA00FF),
+    textMuted = Color(0xFF00E5FF),
+    accentCyan = Color(0xFF00E5FF),
+    accentAmber = Color(0xFFFA00FF)
+)
+
 val LocalTetrisColors = staticCompositionLocalOf { LightTokens }
 
 @Composable
 fun TETRISTheme(
-    darkTheme: Boolean = false,
+    themeMode: Int = 0, // 0: Light, 1: Dark, 2: Cyberpunk
     content: @Composable () -> Unit
 ) {
-    val colors = if (darkTheme) DarkTokens else LightTokens
+    val colors = when(themeMode) {
+        0 -> LightTokens
+        1 -> DarkTokens
+        2 -> CyberpunkTokens
+        else -> DarkTokens
+    }
+    
+    val darkTheme = themeMode != 0
     
     val colorScheme = if (darkTheme) {
         darkColorScheme(

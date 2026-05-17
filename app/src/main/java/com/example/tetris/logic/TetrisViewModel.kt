@@ -3,6 +3,11 @@ package com.example.tetris.logic
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -37,6 +42,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     // ========== SETTINGS & UI STATE ==========
     var themeMode by mutableStateOf(0)
+    var paletteMode by mutableStateOf(0) // 0: Neon, 1: Classic, 2: Minimalist
     var showSettings by mutableStateOf(false)
     var musicVolume by mutableStateOf(0.5f)
     var sfxVolume by mutableStateOf(0.5f)
@@ -60,15 +66,48 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     private var soundManager: SoundManager? = null
     private var currentActivity: Activity? = null
 
-    private val shapes = listOf(
-        TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,1,1,1), intArrayOf(0,0,0,0), intArrayOf(0,0,0,0)), 0xFF00E5F0, "I"),
-        TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,1,1,0), intArrayOf(0,1,1,0), intArrayOf(0,0,0,0)), 0xFFF7E476, "O"),
-        TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,1,0,0), intArrayOf(1,1,1,0), intArrayOf(0,0,0,0)), 0xFFCF6FDD, "T"),
-        TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,1,1,0), intArrayOf(1,1,0,0), intArrayOf(0,0,0,0)), 0xFF6FCF97, "S"),
-        TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,1,0,0), intArrayOf(0,1,1,0), intArrayOf(0,0,0,0)), 0xFFE66767, "Z"),
-        TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,0,0,0), intArrayOf(1,1,1,0), intArrayOf(0,0,0,0)), 0xFFF2A65A, "L"),
-        TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,0,1,0), intArrayOf(1,1,1,0), intArrayOf(0,0,0,0)), 0xFF5A8DF2, "J")
-    )
+    private fun vibrate(duration: Long = 50) {
+        if (!isVibrationOn) {
+            Log.d("TetrisVibration", "Vibration is OFF in settings")
+            return
+        }
+        Log.d("TetrisVibration", "Vibrating for $duration ms")
+        val context = getApplication<Application>()
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(duration)
+        }
+    }
+
+    private val shapes get() = getShapesForPalette(paletteMode)
+
+    private fun getShapesForPalette(mode: Int): List<TetrisPiece> {
+        val palette = when (mode) {
+            0 -> com.example.tetris.ui.theme.NeonPalette
+            1 -> com.example.tetris.ui.theme.ClassicPalette
+            2 -> com.example.tetris.ui.theme.MinimalistPalette
+            else -> com.example.tetris.ui.theme.NeonPalette
+        }
+        return listOf(
+            TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,1,1,1), intArrayOf(0,0,0,0), intArrayOf(0,0,0,0)), palette.I, "I"),
+            TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,1,1,0), intArrayOf(0,1,1,0), intArrayOf(0,0,0,0)), palette.O, "O"),
+            TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,1,0,0), intArrayOf(1,1,1,0), intArrayOf(0,0,0,0)), palette.T, "T"),
+            TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,1,1,0), intArrayOf(1,1,0,0), intArrayOf(0,0,0,0)), palette.S, "S"),
+            TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,1,0,0), intArrayOf(0,1,1,0), intArrayOf(0,0,0,0)), palette.Z, "Z"),
+            TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(1,0,0,0), intArrayOf(1,1,1,0), intArrayOf(0,0,0,0)), palette.L, "L"),
+            TetrisPiece(arrayOf(intArrayOf(0,0,0,0), intArrayOf(0,0,1,0), intArrayOf(1,1,1,0), intArrayOf(0,0,0,0)), palette.J, "J")
+        )
+    }
 
     init {
         resetGame()
@@ -77,6 +116,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     fun initPrefs() {
         val prefs = getApplication<Application>().getSharedPreferences("tetris_prefs", Context.MODE_PRIVATE)
         themeMode = prefs.getInt("themeMode", 0)
+        paletteMode = prefs.getInt("paletteMode", 0)
         musicVolume = prefs.getFloat("musicVolume", 0.5f)
         sfxVolume = prefs.getFloat("sfxVolume", 0.5f)
         isMusicOn = prefs.getBoolean("isMusicOn", true)
@@ -117,6 +157,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
         val prefs = getApplication<Application>().getSharedPreferences("tetris_prefs", Context.MODE_PRIVATE)
         prefs.edit().apply {
             putInt("themeMode", themeMode)
+            putInt("paletteMode", paletteMode)
             putFloat("musicVolume", musicVolume)
             putFloat("sfxVolume", sfxVolume)
             putBoolean("isMusicOn", isMusicOn)
@@ -140,6 +181,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     fun resetToDefaultSettings() {
         themeMode = 0
+        paletteMode = 0
         musicVolume = 0.5f
         sfxVolume = 0.5f
         isMusicOn = true
@@ -164,6 +206,24 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setSoundManagerBGM(enabled: Boolean) {
         soundManager?.bgmEnabled = enabled
+    }
+
+    fun changeTheme(mode: Int) {
+        themeMode = mode
+        saveSettings()
+    }
+
+    fun changePalette(mode: Int) {
+        paletteMode = mode
+        // Cập nhật màu cho piece hiện tại và tiếp theo nếu cần
+        val newShapes = getShapesForPalette(mode)
+        currentPiece = currentPiece?.let { cp ->
+            newShapes.find { it.name == cp.name }?.copy(matrix = cp.matrix)
+        }
+        nextPiece = nextPiece?.let { np ->
+            newShapes.find { it.name == np.name }
+        }
+        saveSettings()
     }
 
     fun changeSpeed(level: Int) {
@@ -296,6 +356,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
             currentY++
         }
         if (isSfxOn) soundManager?.play(TetrisSound.LOCK)
+        vibrate(100)
         lockPiece()
     }
 
@@ -320,6 +381,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun lockPiece() {
         val piece = currentPiece ?: return
+        vibrate(40)
         val newGrid = grid.map { it.copyOf() }.toTypedArray()
         for (r in piece.matrix.indices) {
             for (c in piece.matrix[0].indices) {
