@@ -95,11 +95,12 @@ class SoundManager(private val context: Context) {
 
     fun resumeBGM() {
         if (!bgmEnabled) return
-        if (mediaPlayer == null) {
+        val player = mediaPlayer
+        if (player == null) {
             // MediaPlayer đã bị release, tạo lại
             startBGM()
-        } else if (!mediaPlayer!!.isPlaying) {
-            mediaPlayer?.start()
+        } else if (!player.isPlaying) {
+            player.start()
         }
     }
 

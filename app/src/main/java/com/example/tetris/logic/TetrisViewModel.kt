@@ -3,7 +3,6 @@ package com.example.tetris.logic
 import android.app.Activity
 import android.app.Application
 import android.content.Context
-import android.os.Vibrator
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -85,8 +84,25 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
         isVibrationOn = prefs.getBoolean("isVibrationOn", true)
         isGhostOn = prefs.getBoolean("isGhostOn", true)
         speedLevel = prefs.getInt("speedLevel", 1)
-        
-        ensureManagersInitialized()
+        // Load saved game progress
+        score = prefs.getInt("score", 0)
+        lines = prefs.getInt("lines", 0)
+        // Load saved grid and piece state
+        val gridStr = prefs.getString("grid", null)
+        if (gridStr != null) {
+            decodeGrid(gridStr)
+        }
+        currentX = prefs.getInt("currentX", 3)
+        currentY = prefs.getInt("currentY", 0)
+        val curName = prefs.getString("currentPiece", null)
+        if (curName != null) {
+            currentPiece = shapes.find { it.name == curName }
+        }
+        val nextName = prefs.getString("nextPiece", null)
+        if (nextName != null) {
+            nextPiece = shapes.find { it.name == nextName }
+        }
+        isGameOver = prefs.getBoolean("isGameOver", false)
     }
 
     private fun ensureManagersInitialized() {
@@ -108,6 +124,16 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
             putBoolean("isVibrationOn", isVibrationOn)
             putBoolean("isGhostOn", isGhostOn)
             putInt("speedLevel", speedLevel)
+            // Save current game progress
+            putInt("score", score)
+            putInt("lines", lines)
+            // Save grid and piece state
+            putString("grid", encodeGrid())
+            putInt("currentX", currentX)
+            putInt("currentY", currentY)
+            putString("currentPiece", currentPiece?.name)
+            putString("nextPiece", nextPiece?.name)
+            putBoolean("isGameOver", isGameOver)
             apply()
         }
     }
@@ -132,6 +158,8 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     fun onPause() {
         soundManager?.pauseBGM()
         isPaused = true
+        // Save progress when pausing or exiting
+        saveSettings() // this now also saves score and lines
     }
 
     fun setSoundManagerBGM(enabled: Boolean) {
@@ -187,13 +215,18 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun spawnPiece() {
-        currentPiece = nextPiece ?: shapes.random()
+        val newPiece = nextPiece ?: shapes.random()
+        currentPiece = newPiece
         nextPiece = shapes.random()
         currentX = 3
         currentY = 0
         
-        if (checkCollision(currentX, currentY, currentPiece!!)) {
+        if (checkCollision(currentX, currentY, newPiece)) {
             isGameOver = true
+            // Reset score and lines on game over
+            score = 0
+            lines = 0
+            saveSettings()
             if (isSfxOn) soundManager?.play(TetrisSound.GAME_OVER)
         }
     }
@@ -215,7 +248,8 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     fun moveLeft() {
         if (isGameOver || isPaused) return
-        if (!checkCollision(currentX - 1, currentY, currentPiece!!)) {
+        val piece = currentPiece ?: return
+        if (!checkCollision(currentX - 1, currentY, piece)) {
             currentX--
             if (isSfxOn) soundManager?.play(TetrisSound.MOVE)
         }
@@ -223,15 +257,17 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     fun moveRight() {
         if (isGameOver || isPaused) return
-        if (!checkCollision(currentX + 1, currentY, currentPiece!!)) {
+        val piece = currentPiece ?: return
+        if (!checkCollision(currentX + 1, currentY, piece)) {
             currentX++
             if (isSfxOn) soundManager?.play(TetrisSound.MOVE)
         }
     }
 
     fun rotatePiece() {
-        if (isGameOver || isPaused || currentPiece == null) return
-        val matrix = currentPiece!!.matrix
+        if (isGameOver || isPaused) return
+        val piece = currentPiece ?: return
+        val matrix = piece.matrix
         val n = matrix.size
         val rotated = Array(n) { IntArray(n) }
         for (i in 0 until n) {
@@ -239,7 +275,7 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
                 rotated[j][n - 1 - i] = matrix[i][j]
             }
         }
-        val newPiece = currentPiece!!.copy(matrix = rotated)
+        val newPiece = piece.copy(matrix = rotated)
         
         // Wall-kick: Thử các vị trí lân cận để xoay nếu bị sát vách
         val offsets = listOf(0, -1, 1, -2, 2)
@@ -255,7 +291,8 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
 
     fun hardDrop() {
         if (isGameOver || isPaused) return
-        while (!checkCollision(currentX, currentY + 1, currentPiece!!)) {
+        val piece = currentPiece ?: return
+        while (!checkCollision(currentX, currentY + 1, piece)) {
             currentY++
         }
         if (isSfxOn) soundManager?.play(TetrisSound.LOCK)
@@ -263,17 +300,18 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getGhostY(): Int {
-        if (currentPiece == null) return 0
+        val piece = currentPiece ?: return 0
         var gy = currentY
-        while (!checkCollision(currentX, gy + 1, currentPiece!!)) {
+        while (!checkCollision(currentX, gy + 1, piece)) {
             gy++
         }
         return gy
     }
 
     fun moveDown() {
-        if (isGameOver || isPaused || currentPiece == null) return
-        if (!checkCollision(currentX, currentY + 1, currentPiece!!)) {
+        if (isGameOver || isPaused) return
+        val piece = currentPiece ?: return
+        if (!checkCollision(currentX, currentY + 1, piece)) {
             currentY++
         } else {
             lockPiece()
@@ -334,8 +372,31 @@ class TetrisViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun encodeGrid(): String {
+        return grid.joinToString(";") { row -> row.joinToString(",") }
+    }
+
+    private fun decodeGrid(gridStr: String) {
+        try {
+            val rows = gridStr.split(";")
+            if (rows.size == 20) {
+                val newGrid = Array(20) { r ->
+                    val cols = rows[r].split(",")
+                    Array(10) { c ->
+                        cols[c].toLongOrNull() ?: 0L
+                    }
+                }
+                grid = newGrid
+            }
+        } catch (_: Exception) {
+            // Keep current grid if decoding fails
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        // Persist state on ViewModel clearance
+        saveSettings()
         soundManager?.release()
     }
 }
